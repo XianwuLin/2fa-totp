@@ -17,7 +17,7 @@ query = Query()
 passphrase = "6V5#645L5FJn#Zc9i^i$b^3*38dShnk$"
 aes = AESCipher(passphrase)
 
-CACHE = ExpiringDict(max_len=10000, max_age_seconds=30)
+CACHE = ExpiringDict(max_len=10000, max_age_seconds=60)
 
 def response(status, message, result=None):
     return jsonify({
@@ -54,18 +54,48 @@ def save_seed():
         return response(status=4004, message="username exists")
 
     tp = Totp(seed=seed)
-    if tp.seed_verify(second_token) and tp.seed_verify_last(first_token):
+    # 计算服务器和本地的时间差
+    jet_lag_unit = tp.calc_jet_lag_unit(first_token, second_token)
+    if jet_lag_unit is None:
+        # 如果超过了允许的时间差，则验证不通过
+        return response(status=4000, message="verify seed fail")
+    else:
         # seed aes256加密
         seed_aes = aes.encrypt(seed)
         # 不允许出现两个一样的seed，提高安全性
         if DB.search(query.seed == seed_aes):
             return response(status=4001, message="seed repeat")
         # 保存到db
-        DB.insert({'username': username, 'seed': seed_aes, 'created': int(time.time())})
+        DB.insert({'username': username, 'seed': seed_aes, 'created': int(time.time()), "jet_lag_unit": jet_lag_unit})
         return response_success()
-    else:
-        return response(status=4000, message="verify seed fail")
 
+
+@app.route('/api/resync', methods=['POST'])
+def resync():
+    """时间同步"""
+    username = request.form.get('username')
+    first_token = request.form.get("first_token")
+    second_token = request.form.get("second_token")
+    # first_token和second_token不能重复
+    if first_token == second_token:
+        return response(status=4000, message="verify seed fail")
+    # 获取当前用户
+    users = DB.search(query.username == username)
+    if not users:
+        return response(status=4002, message="username not exists")
+
+    user = users[0]
+    seed = aes.decrypt(user.get("seed"))
+    tp = Totp(seed=seed)
+    # 计算服务器和本地的时间差
+    jet_lag_unit = tp.calc_jet_lag_unit(first_token, second_token)
+    if jet_lag_unit is None:
+        # 如果超过了允许的时间差，则验证不通过
+        return response(status=4000, message="verify seed fail")
+    else:
+        # 更新时间差
+        DB.update({'jet_lag_unit': jet_lag_unit}, query.username == username)
+        return response_success()
 
 @app.route('/api/verify_token', methods=['POST'])
 def verify_token():
@@ -86,8 +116,9 @@ def verify_token():
 
     user = users[0]
     seed = aes.decrypt(user.get("seed"))
+    jet_lag_unit = user.get("jet_lag_unit", 0)
     tp = Totp(seed=seed)
-    if tp.seed_verify(token):
+    if tp.token_verify(token, jet_lag_unit=jet_lag_unit):
         return response_success()
     else:
         return response(status=4003, message="token verify fail")

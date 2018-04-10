@@ -17,6 +17,7 @@
     <div class="container-fluid">
         <div class="row">
             <div class="col-md-6" style="text-align:center">
+                <h2 style="text-align:center">录入及同步</h2>
                 <form class="form-horizontal" style="margin-bottom: 20px;">
                     <div class="form-group">
                         <label class="col-md-2 control-label">输入用户名</label>
@@ -43,9 +44,11 @@
                         </div>
                     </div>
                     <button class="btn btn-default" id="save_seed">录入Seed</button>
+                    <button class="btn btn-default" id="resync">同步</button>
                 </form>
             </div>
             <div class="col-md-6">
+                <h2 style="text-align:center">登录验证</h2>
                 <form class="form-horizontal"  style="text-align:center">
                     <div class="form-group">
                         <label class="col-md-2 control-label">输入用户名</label>
@@ -114,7 +117,32 @@
                     }
                 });
         }
+    });
 
+    $("#resync").click(function(event){
+        event.preventDefault();
+        if ($("#create_username").val().length === 0 || $("#create_username").val().length > 25) {
+            alert("请输入一个不长于25字符的用户名");
+        }else if(($("#first_token").val().length !== 6 || $("#second_token").val().length !== 6)){
+            alert("请输入合法的token")
+        }else {
+            $.post('/api/resync', {
+                    username: $("#create_username").val(),
+                    first_token: $("#first_token").val(),
+                    second_token: $("#second_token").val()
+                },
+                function (data) {
+                    if (data.status == 2000) {
+                        alert("同步成功")
+                    } else if(data.status == 4002) {
+                        alert("用户名不存在");
+                    } else if(data.status == 4000) {
+                        alert("同步失败");
+                    } else {
+                        alert("同步失败");
+                    }
+                });
+        }
     });
 
     $("#verify_token").click(function(event){
