@@ -1,1 +1,1 @@
-# totp_pw
+# 2fa-totp

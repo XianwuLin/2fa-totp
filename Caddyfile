@@ -1,0 +1,9 @@
+http://0.0.0.0:80 {
+    root ./
+    ext .html
+    proxy /api/ http://127.0.0.1:8080 {
+        policy round_robin
+        fail_timeout 30s
+        max_fails 5
+    }
+}

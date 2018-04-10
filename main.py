@@ -1,55 +1,97 @@
-import pyotp
-import datetime
+#!/usr/bin/python
+# -*- coding: utf-8 -*-
+
+from flask import Flask, jsonify, request
+from tinydb import Query, TinyDB
+from crypt import AESCipher
+import time
+from totp import Totp
+from expiringdict import ExpiringDict
+
+app = Flask(__name__)
+app.secret_key = '19#^f8kV8D55h!TXruYum%^VQh$zsCeQ'
+
+DB = TinyDB('./db.json')
+query = Query()
+
+passphrase = "6V5#645L5FJn#Zc9i^i$b^3*38dShnk$"
+aes = AESCipher(passphrase)
+
+CACHE = ExpiringDict(max_len=10000, max_age_seconds=30)
+
+def response(status, message, result=None):
+    return jsonify({
+        "status": status,
+        "message": message,
+        "result": result
+    })
+
+def response_success(result=None):
+    return response(2000, "success", result)
 
 
-class Totp_pw(object):
+@app.route('/api/create_seed', methods=['POST'])
+def create_seed():
+    """生成一个seed和对应的url"""
+    username = request.form.get('username')
+    tp = Totp()
+    tp.create_seed()
+    return response_success(result={"url": tp.create_url(username), "seed": tp.seed})
 
-    def __init__(self, pw=None):
-        if pw is not None:
-            self.pw = pw
-            self.totp = pyotp.TOTP(pw)
-        else:
-            self.pw = None
-            self.totp = None
 
-    def create_pw(self, length=32):
-        self.pw = pyotp.random_base32(length=length)
-        self.totp = pyotp.TOTP(self.pw)
-        return self.pw
+@app.route('/api/save_seed', methods=['POST'])
+def save_seed():
+    """提供用户名、seed和最近两次token，保存数据"""
+    username = request.form.get('username')
+    seed = request.form.get('seed')
+    first_token = request.form.get("first_token")
+    second_token = request.form.get("second_token")
+    # first_token和second_token不能重复
+    if first_token == second_token:
+        return response(status=4000, message="verify seed fail")
+    # 已存在的用户不允许再添加seed
+    if DB.search(query.username == username):
+        return response(status=4004, message="username exists")
 
-    def pw_verify(self, token):
-        return self.totp.verify(token, valid_window=1)
+    tp = Totp(seed=seed)
+    if tp.seed_verify(second_token) and tp.seed_verify_last(first_token):
+        # seed aes256加密
+        seed_aes = aes.encrypt(seed)
+        # 不允许出现两个一样的seed，提高安全性
+        if DB.search(query.seed == seed_aes):
+            return response(status=4001, message="seed repeat")
+        # 保存到db
+        DB.insert({'username': username, 'seed': seed_aes, 'created': int(time.time())})
+        return response_success()
+    else:
+        return response(status=4000, message="verify seed fail")
 
-    def pw_verify_last(self, token):
-        return self.totp.verify(token,
-                        for_time=datetime.datetime.now() - datetime.timedelta(seconds=30),
-                        valid_window=1)
 
-    def create_url(self, account_name, app_name="Ttotp"):
-        return self.totp.provisioning_uri(name=account_name, issuer_name=app_name)
+@app.route('/api/verify_token', methods=['POST'])
+def verify_token():
+    """验证用户的token是否正确"""
+    username = request.form.get('username')
+    token = request.form.get("token")
 
-    def create_qrcode(self, account_name, app_name="Ttotp"):
-        import qrcode
-        import base64
-        import cStringIO
-        url = self.create_url(account_name=account_name, app_name="Ttotp")
-        qr = qrcode.QRCode(version=1,
-                               error_correction=qrcode.constants.ERROR_CORRECT_L,
-                               box_size=8,
-                               border=2)
-        qr.add_data(url)
-        qr.make(fit=True)
-        img = qr.make_image(fill_color="black", back_color="white")
-        io_buffer = cStringIO.StringIO()
-        img.save(io_buffer, format="JPEG")
-        return base64.b64encode(io_buffer.getvalue())
+    # 确保token只能使用一次
+    if CACHE.get(token):
+        return response(status=4003, message="token verify fail")
+    else:
+        CACHE[token] = 1
 
-def main():
-    tp = Totp_pw()
-    print tp.create_pw()
-    with open("1.html", "w") as f:
-        f.write('<img src="data:image/jpeg;base64,{0}" style="height: 180px">'.format(tp.create_qrcode(account_name="user")))
-    print "finish"
+    # 如果用户不存在，抛出错误
+    users = DB.search(query.username == username)
+    if not users:
+        return response(status=4002, message="username not exists")
+
+    user = users[0]
+    seed = aes.decrypt(user.get("seed"))
+    tp = Totp(seed=seed)
+    if tp.seed_verify(token):
+        return response_success()
+    else:
+        return response(status=4003, message="token verify fail")
+
 
 if __name__ == '__main__':
-    main()
+    app.run(port=8080)
