@@ -1,5 +1,6 @@
-pyotp==2.26
+pyotp==2.2.6
 Flask==0.12.2
 tinydb==3.8.1
 expiringdict==1.1.4
 pycrypto==2.6.1
+bcrypt==3.1.4

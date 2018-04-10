@@ -1,0 +1,192 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta http-equiv="X-UA-Compatible" content="ie=edge">
+    <title>二次验证</title>
+    <link rel="stylesheet" href="https://cdn.bootcss.com/bootstrap/3.3.7/css/bootstrap.min.css">
+    <script src="https://cdn.bootcss.com/jquery/3.3.1/jquery.min.js"></script>
+    <script src="https://cdn.bootcss.com/jquery.qrcode/1.0/jquery.qrcode.min.js"></script>
+    <script src="https://cdn.bootcss.com/bootstrap/3.3.7/js/bootstrap.min.js"></script>
+</head>
+
+<body>
+    <h1 style="text-align:center">二次验证（基于2FA-TOTP）</h1>
+    <div class="container-fluid">
+        <div class="row">
+            <div class="col-md-6" style="text-align:center">
+                <h2 style="text-align:center">录入及同步</h2>
+                <form class="form-horizontal" style="margin-bottom: 20px;">
+                    <div class="form-group">
+                        <label class="col-md-2 control-label">输入用户名</label>
+                        <div class="col-md-6">
+                            <input type="text" class="form-control" id="create_username" placeholder="用户名（英文）" required>
+                        </div>
+                    </div>
+                    <button id="create_qrcode" class="btn btn-default">生成Seed</button>
+                </form>
+                <div id="qrcode" style="height: 180px; width: 180px; margin: 0 auto; display: table;"></div>
+                <div id="seed-div" style="display: none;"><span style="margin-right: 30px;">Seed</span><span id="seed" style="padding: 0 1em; border: 2px solid #999; border-radius: 12px; background: #999;"></span></div>
+
+                <form class="form-horizontal" style="margin-top: 20px;">
+                    <div class="form-group">
+                            <label class="col-md-3 control-label">输入pin码(6-16位)</label>
+                            <div class="col-md-6">
+                                <input type="text" class="form-control" id="pin" placeholder="输入pin(6-16位)">
+                            </div>
+                        </div>
+                    <div class="form-group">
+                        <label class="col-md-3 control-label">输入前一个Token</label>
+                        <div class="col-md-6">
+                            <input type="text" class="form-control" id="first_token" placeholder="输入前一个Token">
+                        </div>
+                    </div>
+                    <div class="form-group">
+                        <label class="col-md-3 control-label">输入后一个Token</label>
+                        <div class="col-md-6">
+                            <input type="text" class="form-control" id="second_token" placeholder="输入后一个Token">
+                        </div>
+                    </div>
+                    <button class="btn btn-default" id="save_seed">录入Seed</button>
+                    <button class="btn btn-default" id="resync">同步（不需要pin码）</button>
+                </form>
+            </div>
+            <div class="col-md-6">
+                <h2 style="text-align:center">登录验证</h2>
+                <form class="form-horizontal"  style="text-align:center">
+                    <div class="form-group">
+                        <label class="col-md-3 control-label">输入用户名</label>
+                        <div class="col-md-6">
+                            <input type="text" class="form-control" id="check_username" placeholder="用户名（英文）">
+                        </div>
+                    </div>
+                    <div class="form-group">
+                        <label class="col-md-3 control-label">输入pin码+Token</label>
+                        <div class="col-md-6">
+                            <input type="text" class="form-control" id="check_token" placeholder="输入pin码+Token">
+                        </div>
+                    </div>
+                    <button id="verify_token" class="btn btn-default">验证</button>
+                </form>
+            </div>
+        </div>
+    </div>
+</body>
+
+<script>
+    $("#create_qrcode").click(function (event) {
+        event.preventDefault();
+        if ($("#create_username").val().length == 0 || $("#create_username").val().length > 25) {
+            alert("请输入一个不长于25字符的用户名");
+        } else {
+            $.post('/api/create_seed', {
+                    username: $("#create_username").val()
+                },
+                function (data) {
+                    if (data.status == 2000) {
+                        $("#seed-div").css("display", "block");
+                        createqr(data.result.url);
+                        $("#seed").html(data.result.seed);
+                    } else {
+                        alert("生成Seed失败");
+                    }
+                });
+        }
+    });
+
+    $("#save_seed").click(function(event){
+        event.preventDefault();
+        if ($("#create_username").val().length === 0 || $("#create_username").val().length > 25) {
+            alert("请输入一个不长于25字符的用户名");
+        }else if($("#seed").html().length !== 32){
+            alert("请不要手动修改seed")
+        }else if(($("#first_token").val().length !== 6 || $("#second_token").val().length !== 6)){
+            alert("请输入合法的token")
+        }else if(($("#pin").val().length < 6 || $("#pin").val().length > 16)){
+            alert("请输入合法的pin码")
+        }else {
+            $.post('/api/save_seed', {
+                    username: $("#create_username").val(),
+                    seed: $("#seed").html(),
+                    pin: $("#pin").val(),
+                    first_token: $("#first_token").val(),
+                    second_token: $("#second_token").val()
+                },
+                function (data) {
+                    if (data.status == 2000) {
+                        alert("录入seed成功")
+                    } else if(data.status == 4004) {
+                        alert("用户名已存在");
+                    } else if(data.status == 4001) {
+                        alert("seed已存在");
+                    } else {
+                        alert("录入seed失败，请检查设备时间，并重新生成seed并录入");
+                    }
+                });
+        }
+    });
+
+    $("#resync").click(function(event){
+        event.preventDefault();
+        if ($("#create_username").val().length === 0 || $("#create_username").val().length > 25) {
+            alert("请输入一个不长于25字符的用户名");
+        }else if(($("#first_token").val().length !== 6 || $("#second_token").val().length !== 6)){
+            alert("请输入合法的token")
+        }else {
+            $.post('/api/resync', {
+                    username: $("#create_username").val(),
+                    first_token: $("#first_token").val(),
+                    second_token: $("#second_token").val()
+                },
+                function (data) {
+                    if (data.status == 2000) {
+                        alert("同步成功")
+                    } else if(data.status == 4002) {
+                        alert("用户名不存在");
+                    } else if(data.status == 4000) {
+                        alert("同步失败");
+                    } else {
+                        alert("同步失败");
+                    }
+                });
+        }
+    });
+
+    $("#verify_token").click(function(event){
+        event.preventDefault();
+        if ($("#check_username").val().length === 0 || $("#check_username").val().length > 25) {
+            alert("请输入一个不长于25字符的用户名");
+        }else if($("#check_token").val().length <= 6){
+            alert("请输入合法的pin+token")
+        }else {
+            $.post('/api/verify_token', {
+                    username: $("#check_username").val(),
+                    ptoken: $("#check_token").val()
+                },
+                function (data) {
+                    if (data.status == 2000) {
+                        alert("验证成功")
+                    } else if(data.status == 4002) {
+                        alert("用户名不存在");
+                    } else if(data.status == 4003) {
+                        alert("验证失败");
+                    } else {
+                        alert("验证失败");
+                    }
+                });
+        }
+    });
+
+    function createqr(text) {
+        $("#qrcode").qrcode({
+            text: text,
+            height: 180,
+            width: 180,
+
+        })
+    }
+</script>
+
+</html>

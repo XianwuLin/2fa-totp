@@ -1,4 +1,5 @@
 import base64
+import bcrypt
 import hashlib
 from Crypto import Random
 from Crypto.Cipher import AES
@@ -27,3 +28,9 @@ class AESCipher(object):
     @staticmethod
     def _unpad(s):
         return s[:-ord(s[len(s)-1:])]
+
+def bcrypt_encrypt(password):
+    return bcrypt.hashpw(str(password), bcrypt.gensalt())
+
+def bcrypt_checkpw(password, hashed):
+    return bcrypt.checkpw(str(password), str(hashed))
