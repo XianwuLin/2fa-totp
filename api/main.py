@@ -107,12 +107,6 @@ def verify_token():
     pin = ptoken[:-6]
     token = ptoken[-6:]
 
-    # 确保token只能使用一次
-    if CACHE.get(token):
-        return response(status=4003, message="token verify fail")
-    else:
-        CACHE[token] = 1
-
     # 如果用户不存在，抛出错误
     users = DB.search(query.username == username)
     if not users:
@@ -124,6 +118,11 @@ def verify_token():
     pin_hashed = user.get("pin")
     tp = Totp(seed=seed)
     if tp.token_verify(token, jet_lag_unit=jet_lag_unit) and bcrypt_checkpw(pin, pin_hashed):
+        # 确保token只能被成功使用一次
+        if CACHE.get(token):
+            return response(status=4003, message="token verify fail")
+        else:
+            CACHE[token] = 1
         return response_success()
     else:
         return response(status=4003, message="token verify fail")
